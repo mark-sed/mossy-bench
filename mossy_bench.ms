@@ -92,7 +92,7 @@ fun running(name:String) {
 }
 
 fun finished(name:String, result:Dict) {
-    ~print(f"""[{C_GREEN}DONE{C_OFF}] {name}: {result["time"]} s""")
+    ~print(f"""[{C_GREEN}DONE{C_OFF}] {name}: {result["time_s"]} s""")
 }
 
 fun running_suite(name:String) {
@@ -105,29 +105,34 @@ fun get_platform_info() {
         ~print(f"ERROR: Extraction of platform information has failed: '{results.stderr}'.")
         ~exit(1)
     }
-    return csv.dict_reader(result.stdout)
+    res_dict = csv.dict_reader(result.stdout)
+    res_dict = res_dict[0]
+    res_dict["timestamp"] = time.time()
+    // TODO: Get moss (--moss) version and output warning when DEBUG
+    return res_dict
 }
 
-fun time_benchmark(path:String, name:String, params:String="") {
+fun time_benchmark(path:String, name:String, params:String="", moss_args:String="") {
     ~running(name)
     ~debug("Running benchmark")
-    result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P\" {::MOSS_PATH} {::BENCH_DIR}/{path} {params}")
+    result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::BENCH_DIR}/{path} {params}")
     ~debug("Run finished")
     if (result.return_code != 0) {
         ~print(f"ERROR: Benchmark '{path}' has failed with: '{result.stderr}'.")
         ~exit(1)
     }
     measurements = result.stderr
-    regex = re.compile(r"(.*),(.*)%\n")
+    regex = re.compile(r"(.*),(.*)%,(.*)KB\n")
     match = regex.match(measurements)
-    if (match == nil || match.groups.length() != 3) {
+    if (match == nil || match.groups.length() != 4) {
         ~print(f"ERROR: Benchmark output is incorrect and measurements cannot be extracted. Got: '{measurements}'.")
         ~exit(1)
     }
     m_time = Float(match[1])
     m_cpu = Float(match[2])
-    // TODO: Add platform info and system info
-    result_dict = {"name": name, "params": params, "time": m_time, "cpu": m_cpu, "moss_version": sys.version}
+    m_max_mem = Int(match[3])
+    result_dict = {"name": name, "params": params, "time_s": m_time, "cpu": m_cpu, "moss_version": sys.version,
+                   "memory_max_kb": m_max_mem}
     for (k, v: ::PLATFORM_INFO) {
         result_dict[k] = v
     }
@@ -147,9 +152,21 @@ fun run_og() {
     ]
 }
 
+fun run_parsing() {
+    ~running_suite("Parsing")
+    return [
+        time_benchmark("benchmarks/parsing/md/output_md.ms", "md-to-html-syntax", params=f"{::BENCH_DIR}/benchmarks/parsing/md/syntax.md", moss_args="-f html"),
+        time_benchmark("benchmarks/parsing/md/output_txt.ms", "md-to-txt-syntax", params=f"{::BENCH_DIR}/benchmarks/parsing/md/syntax.md"),
+
+        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-3000", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv"),
+        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-3000-nn", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv nn"),
+    ]
+}
+
 fun run_all() {
     results = []
     results += run_og()
+    results += run_parsing()
     return results
 }
 
@@ -160,14 +177,21 @@ fun main() {
 
     // Init general info variable from "get_platform_info.sh"
     ~debug("Getting platform info.")
-    ::PLATFORM_INFO = get_platform_info()[0]
+    ::PLATFORM_INFO = get_platform_info()
     ~debug("Got platform info: "++::PLATFORM_INFO)
 
     f_name = f"""{::OUT_PATH}/results-{time.strftime("%Y_%m_%d_%H_%M")}.csv"""
     // Prettify path
     f_name = f_name.replace("//", "/")
     res_file = open(f"{f_name}", "w")
+    // Measure time
+    start_time = time.time()
+    
     results = run_all();
+    
+    end_time = time.time()
+    elapsed_time = Int((end_time - start_time)/60.0)
+    
     writer = csv.CSVWriter(res_file)
     // Header
     keys = results[0].keys()
@@ -177,6 +201,9 @@ fun main() {
     ~writer.write_rows(res_list)
     ~res_file.close()
     ~print(f"Results stored to file: {C_BLUE}{f_name}{C_OFF}.")
+    ~print(f"[{C_GREEN}SUCCESS{C_OFF}] Benchmarks finished in {elapsed_time} minutes.")
 
     ~debug("Mossy bench finished.")
 }
+
+// TODO: Run all benchmarks also compiled and store that into results (or leave empty if not run)
