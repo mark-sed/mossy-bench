@@ -235,7 +235,8 @@ fun run_parsing() {
 fun run_mimesis() {
     ~running_suite("Mimesis")
     return [
-        time_benchmark("benchmarks/mimesis/tinynn.ms", "tiny-nn-5000"),
+        time_benchmark("benchmarks/mimesis/tiny-nn/tinynn.ms", "tiny-nn-5000"),
+        time_benchmark("benchmarks/mimesis/game-of-life/game_of_life.ms", "game-of-life-500"),
     ]
 }
 
