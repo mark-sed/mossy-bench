@@ -9,7 +9,7 @@ import time
 import re
 import csv_parser as csv
 
-__VERSION = "0.1.0"
+__VERSION = "0.2.0"
 
 MOSS_PATH = "moss"
 TIME_PATH = "/bin/time"
@@ -17,6 +17,11 @@ WORK_DIR = "./"
 BENCH_DIR = WORK_DIR
 OUT_PATH = "./"
 VERBOSE = false
+
+ITERATIONS=1
+RUN_COMPILED=true
+MOSS_ARGS=""
+
 PLATFORM_INFO = {:}
 
 PLATFORM = sys.platform()
@@ -27,6 +32,7 @@ if (PLATFORM == sys.Platform.Linux) {
     C_GRAY="\q033[1;30m"
     C_PURPLE="\q033[0;35m"
     C_BLUE="\q033[0;34m"
+    C_YELLOW="\q033[1;33m"
 } else {
     C_OFF=""
     C_RED=""
@@ -72,6 +78,21 @@ fun parse_args(args) {
                 i += 1
                 ::OUT_PATH = args[i]
             }
+            case "-i": {
+                i += 1
+                ::ITERATIONS = Int(args[i])
+                if (::ITERATIONS < 1) {
+                    ~print("ERROR: Iterations cannot be < 1")
+                    ~exit(1)
+                }
+            }
+            case "-a", "--moss-args": {
+                i += 1
+                ::MOSS_ARGS = args[i]
+            }
+            case "-nc", "--no-compile": {
+                ::RUN_COMPILED = false
+            }
             default: {
                 ~print("Unknown argument: " ++ a)
                 exit(1)
@@ -102,37 +123,85 @@ fun running_suite(name:String) {
 fun get_platform_info() {
     result = subprocess.run(f"bash {::WORK_DIR}/get_platform_info.sh")
     if (result.return_code != 0) {
-        ~print(f"ERROR: Extraction of platform information has failed: '{results.stderr}'.")
+        ~print(f"ERROR: Extraction of platform information has failed: '{result.stderr}'.")
         ~exit(1)
     }
     res_dict = csv.dict_reader(result.stdout)
     res_dict = res_dict[0]
     res_dict["timestamp"] = time.time()
-    // TODO: Get moss (--moss) version and output warning when DEBUG
+    res_dict["iterations"] = ::ITERATIONS
+    // Get moss (--moss) version and output warning when DEBUG
+    result = subprocess.run(f"{::MOSS_PATH} --version")
+    if (result.return_code != 0) {
+        ~print(f"ERROR: Getting version of moss has failed: '{result.stderr}'.")
+        ~exit(1)
+    }
+    version = result.stdout
+    if ("DEBUG" in version) {
+        ~print(f"{C_YELLOW}WARNING: Benchmarking on DEBUG build!{C_OFF}")
+    }
+    // Cut off "moss " from --version output and "\n".
+    res_dict["moss_version"] = version[5..version.length()-1]
     return res_dict
 }
 
 fun time_benchmark(path:String, name:String, params:String="", moss_args:String="") {
     ~running(name)
     ~debug("Running benchmark")
-    result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::BENCH_DIR}/{path} {params}")
-    ~debug("Run finished")
-    if (result.return_code != 0) {
-        ~print(f"ERROR: Benchmark '{path}' has failed with: '{result.stderr}'.")
-        ~exit(1)
+    time_sum = 0.0
+    for (i: 0..::ITERATIONS) {
+        result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::MOSS_ARGS} {::BENCH_DIR}/{path} {params}")
+        ~debug("Run finished")
+        if (result.return_code != 0) {
+            ~print(f"ERROR: Benchmark '{path}' has failed with: '{result.stderr}'.")
+            ~exit(1)
+        }
+        measurements = result.stderr
+        regex = re.compile(r"(.*),(.*)%,(.*)KB\n")
+        match = regex.match(measurements)
+        if (match == nil || match.groups.length() != 4) {
+            ~print(f"ERROR: Benchmark output is incorrect and measurements cannot be extracted. Got: '{measurements}'.")
+            ~exit(1)
+        }
+        m_time = Float(match[1])
+        time_sum += m_time
     }
-    measurements = result.stderr
-    regex = re.compile(r"(.*),(.*)%,(.*)KB\n")
-    match = regex.match(measurements)
-    if (match == nil || match.groups.length() != 4) {
-        ~print(f"ERROR: Benchmark output is incorrect and measurements cannot be extracted. Got: '{measurements}'.")
-        ~exit(1)
-    }
-    m_time = Float(match[1])
     m_cpu = Float(match[2])
     m_max_mem = Int(match[3])
-    result_dict = {"name": name, "params": params, "time_s": m_time, "cpu": m_cpu, "moss_version": sys.version,
-                   "memory_max_kb": m_max_mem}
+    // Compile and run compiled to compare
+    if (::RUN_COMPILED) {
+        compiled_out = f"{::BENCH_DIR}/{path}"
+        ~debug(f"Compiling program to: '{compiled_out}'.")
+        result = subprocess.run(f"{::MOSS_PATH} --compile-only -o {compiled_out} {::BENCH_DIR}/{path}")
+        if (result.return_code != 0) {
+            ~print(f"ERROR: Benchmark compilation has failed: '{result.stderr}'.")
+            ~exit(1)
+        }
+        ~debug("Compilation finished, running compiled program")
+        result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::MOSS_ARGS} {::BENCH_DIR}/{path}.msb {params}")
+        ~debug("Compiled run finished")
+        if (result.return_code != 0) {
+            ~print(f"ERROR: Compiled benchmark '{path}.msb' has failed with: '{result.stderr}'.")
+            ~exit(1)
+        }
+        measurements = result.stderr
+        regex = re.compile(r"(.*),(.*)%,(.*)KB\n")
+        match = regex.match(measurements)
+        if (match == nil || match.groups.length() != 4) {
+            ~print(f"ERROR: Benchmark output is incorrect and measurements cannot be extracted. Got: '{measurements}'.")
+            ~exit(1)
+        }
+        comp_time = Float(match[1])
+        comp_cpu = Float(match[2])
+        comp_max_mem = Int(match[3])
+        // Delete compiled program
+        ~debug("Deleting compiled program.")
+        ~subprocess.system(f"rm -f {::BENCH_DIR}/{path}.msb")
+    }
+    // TODO: Store all measured times
+    result_dict = {"name": name, "params": params, "time_s": time_sum/::ITERATIONS, "cpu": m_cpu,
+                   "memory_max_kb": m_max_mem, "compiled_time_s": comp_time, "compiled_cpu": comp_cpu,
+                   "compiled_memory": comp_max_mem}
     for (k, v: ::PLATFORM_INFO) {
         result_dict[k] = v
     }
@@ -158,8 +227,23 @@ fun run_parsing() {
         time_benchmark("benchmarks/parsing/md/output_md.ms", "md-to-html-syntax", params=f"{::BENCH_DIR}/benchmarks/parsing/md/syntax.md", moss_args="-f html"),
         time_benchmark("benchmarks/parsing/md/output_txt.ms", "md-to-txt-syntax", params=f"{::BENCH_DIR}/benchmarks/parsing/md/syntax.md"),
 
-        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-3000", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv"),
-        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-3000-nn", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv nn"),
+        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-1000", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv"),
+        time_benchmark("benchmarks/parsing/csv/to_dict.ms", "csv-parsing-1000-nn", params=f"{::BENCH_DIR}/benchmarks/parsing/csv/f1_results.csv nn"),
+    ]
+}
+
+fun run_mimesis() {
+    ~running_suite("Mimesis")
+    return [
+        time_benchmark("benchmarks/mimesis/tinynn.ms", "tiny-nn-5000"),
+    ]
+}
+
+fun run_mark_sed_gh() {
+    ~running_suite("Mark-Sed GH")
+    return [
+        time_benchmark("benchmarks/mark-sed-gh/pess/pess.ms", "pess-34", moss_args="-f html", params=f"{::BENCH_DIR}/benchmarks/mark-sed-gh/pess/Short_v_Timman_1991.pgn"),
+        time_benchmark("benchmarks/mark-sed-gh/pess/pess.ms", "pess-136", moss_args="-f html", params=f"{::BENCH_DIR}/benchmarks/mark-sed-gh/pess/Carlsen_Nepomniachtchi_FWC2021.pgn"),
     ]
 }
 
@@ -167,6 +251,8 @@ fun run_all() {
     results = []
     results += run_og()
     results += run_parsing()
+    results += run_mimesis()
+    results += run_mark_sed_gh()
     return results
 }
 
@@ -180,7 +266,7 @@ fun main() {
     ::PLATFORM_INFO = get_platform_info()
     ~debug("Got platform info: "++::PLATFORM_INFO)
 
-    f_name = f"""{::OUT_PATH}/results-{time.strftime("%Y_%m_%d_%H_%M")}.csv"""
+    f_name = f"""{::OUT_PATH}/results-{::PLATFORM_INFO["moss_version"]}-{time.strftime("%Y_%m_%d_%H_%M")}.csv"""
     // Prettify path
     f_name = f_name.replace("//", "/")
     res_file = open(f"{f_name}", "w")
@@ -203,7 +289,6 @@ fun main() {
     ~print(f"Results stored to file: {C_BLUE}{f_name}{C_OFF}.")
     ~print(f"[{C_GREEN}SUCCESS{C_OFF}] Benchmarks finished in {elapsed_time} minutes.")
 
+    // TODO: Print some summary
     ~debug("Mossy bench finished.")
 }
-
-// TODO: Run all benchmarks also compiled and store that into results (or leave empty if not run)
