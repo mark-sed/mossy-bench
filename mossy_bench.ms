@@ -237,6 +237,7 @@ fun run_mimesis() {
     return [
         time_benchmark("benchmarks/mimesis/tiny-nn/tinynn.ms", "tiny-nn-5000"),
         time_benchmark("benchmarks/mimesis/game-of-life/game_of_life.ms", "game-of-life-500"),
+        time_benchmark("benchmarks/mimesis/particle-simulation/particle_simulation.ms", "particle-sim-1000p-200i"),
     ]
 }
 
