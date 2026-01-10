@@ -238,6 +238,7 @@ fun run_mimesis() {
         time_benchmark("benchmarks/mimesis/tiny-nn/tinynn.ms", "tiny-nn-5000"),
         time_benchmark("benchmarks/mimesis/game-of-life/game_of_life.ms", "game-of-life-500"),
         time_benchmark("benchmarks/mimesis/particle-simulation/particle_simulation.ms", "particle-sim-1000p-200i"),
+        time_benchmark("benchmarks/mimesis/solar-system-sim/solar_system.ms", "solar-system-5yrs"),
     ]
 }
 
@@ -271,7 +272,6 @@ fun main() {
     f_name = f"""{::OUT_PATH}/results-{::PLATFORM_INFO["moss_version"]}-{time.strftime("%Y_%m_%d_%H_%M")}.csv"""
     // Prettify path
     f_name = f_name.replace("//", "/")
-    res_file = open(f"{f_name}", "w")
     // Measure time
     start_time = time.time()
     
@@ -280,6 +280,7 @@ fun main() {
     end_time = time.time()
     elapsed_time = Int((end_time - start_time)/60.0)
     
+    res_file = open(f"{f_name}", "w")
     writer = csv.CSVWriter(res_file)
     // Header
     keys = results[0].keys()
