@@ -2,6 +2,8 @@ d"""
 Simplified Simulation of Solar System
 """
 
+import math.atan
+
 // Constants (scaled units)
 G = 4.0 * Math.pi ^ 2 // AU ^ 3 / (year ^ 2 * solar_mass)
 DAY_TO_YEAR = 1.0 / 365.25
@@ -85,13 +87,13 @@ fun simulate(days, dt_days=0.5) {
 
 fun atan2(y, x) {
     if (x > 0)
-        return Math.atan(y / x)
+        return atan(y / x)
 
     if (x < 0 and y >= 0)
-        return Math.atan(y / x) + Math.pi
+        return atan(y / x) + Math.pi
 
     if (x < 0 and y < 0)
-        return Math.atan(y / x) - Math.pi
+        return atan(y / x) - Math.pi
 
     if (x == 0 and y > 0)
         return Math.pi / 2
