@@ -242,6 +242,15 @@ fun run_mimesis() {
     ]
 }
 
+fun run_numerica() {
+    ~running_suite("Numerica")
+    return [
+        time_benchmark("benchmarks/numerica/fft/fft.ms", "fft-4096"),
+        time_benchmark("benchmarks/numerica/eratosthenes/eratosthenes_sieve.ms", "eratosthenes-sieve-500000"),
+        time_benchmark("benchmarks/numerica/simpson-integral/simpson_integral.ms", "simpson-integral-200000"),
+    ]
+}
+
 fun run_mark_sed_gh() {
     ~running_suite("Mark-Sed GH")
     return [
@@ -255,6 +264,7 @@ fun run_all() {
     results += run_og()
     results += run_parsing()
     results += run_mimesis()
+    results += run_numerica()
     results += run_mark_sed_gh()
     return results
 }
