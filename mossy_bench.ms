@@ -170,7 +170,7 @@ fun time_benchmark(path:String, name:String, params:String="", moss_args:String=
     m_max_mem = Int(match[3])
     // Compile and run compiled to compare
     if (::RUN_COMPILED) {
-        compiled_out = f"{::BENCH_DIR}/{path}"
+        compiled_out = f"{::BENCH_DIR}/{path}.msb"
         ~debug(f"Compiling program to: '{compiled_out}'.")
         result = subprocess.run(f"{::MOSS_PATH} --compile-only -o {compiled_out} {::BENCH_DIR}/{path}")
         if (result.return_code != 0) {
@@ -178,7 +178,7 @@ fun time_benchmark(path:String, name:String, params:String="", moss_args:String=
             ~exit(1)
         }
         ~debug("Compilation finished, running compiled program")
-        result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::MOSS_ARGS} {::BENCH_DIR}/{path}.msb {params}")
+        result = subprocess.run(f"bash {::WORK_DIR}/run_on_own_core.sh {::TIME_PATH} -f \"%e,%P,%MKB\" {::MOSS_PATH} {moss_args} {::MOSS_ARGS} {compiled_out} {params}")
         ~debug("Compiled run finished")
         if (result.return_code != 0) {
             ~print(f"ERROR: Compiled benchmark '{path}.msb' has failed with: '{result.stderr}'.")
@@ -194,14 +194,29 @@ fun time_benchmark(path:String, name:String, params:String="", moss_args:String=
         comp_time = Float(match[1])
         comp_cpu = Float(match[2])
         comp_max_mem = Int(match[3])
+        // Get bytecode size
+        result2 = subprocess.run(f"{::MOSS_PATH}  -S -o {compiled_out} {moss_args} {::MOSS_ARGS} {::BENCH_DIR}/{path} {params} 2>&1 1>/dev/null && wc -l {compiled_out}")
+        if (result2.return_code != 0) {
+            // Output stdout because of the redirect
+            ~print(f"ERROR: Benchmark compilation for bytecode size has failed: '{result2.stdout}'.")
+            ~exit(1)
+        }
+        regex2 = re.compile(r"([0-9]+) .*\n")
+        measurements2 = result2.stdout
+        match2 = regex2.match(measurements2)
+        if (match2 == nil || match2.groups.length() != 2) {
+            ~print(f"ERROR: Could not extract and compute bytecode size. Got: '{measurements2}'.")
+            ~exit(1)
+        }
+        comp_bc_size = Int(match2[1])
         // Delete compiled program
         ~debug("Deleting compiled program.")
-        ~subprocess.system(f"rm -f {::BENCH_DIR}/{path}.msb")
+        ~subprocess.system(f"rm -f {compiled_out}")
     }
     // TODO: Store all measured times
     result_dict = {"name": name, "params": params, "time_s": time_sum/::ITERATIONS, "cpu": m_cpu,
                    "memory_max_kb": m_max_mem, "compiled_time_s": comp_time, "compiled_cpu": comp_cpu,
-                   "compiled_memory": comp_max_mem}
+                   "compiled_memory": comp_max_mem, "bc_size": comp_bc_size}
     for (k, v: ::PLATFORM_INFO) {
         result_dict[k] = v
     }
